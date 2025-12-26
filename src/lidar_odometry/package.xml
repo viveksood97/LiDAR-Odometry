@@ -25,6 +25,7 @@
   <depend>pcl_ros</depend>
   <depend>libomp-dev</depend>
   <depend>libpcl-all-dev</depend>
+  <depend>boost</depend>
   
   <depend>eigen</depend>
 

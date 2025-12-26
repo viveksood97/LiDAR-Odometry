@@ -6,6 +6,18 @@ LidarOdometryNode::LidarOdometryNode(const rclcpp::NodeOptions& options)
 : Node("lidar_odometry_node", options)
   , lidar_to_base_transform_(initializeLidarToBaseTransform())
   , current_pose_base_(Eigen::Isometry3d::Identity())
+  , initialized_{false}
+  , last_velocity_linear_(Eigen::Vector3d::Zero())
+  , velocity_valid_{false}
+  , last_lidar_time_(this->now())
+  , imu_yaw_rate_(0.0)
+  , max_window_size_{15}
+  , scan_window_(max_window_size_)
+  , local_map_(std::make_shared<pcl::PointCloud<pcl::PointNormal>>())
+  , odom_pub_(this->create_publisher<nav_msgs::msg::Odometry>(
+        "/odom_est", 
+        rclcpp::SensorDataQoS()
+    ))
   , imu_sub_(this->create_subscription<sensor_msgs::msg::Imu>(
         "/livox/amr/imu",
         rclcpp::SensorDataQoS(), 
@@ -18,13 +30,7 @@ LidarOdometryNode::LidarOdometryNode(const rclcpp::NodeOptions& options)
         rclcpp::SensorDataQoS(),
         std::bind(&LidarOdometryNode::lidarCallback, this, std::placeholders::_1)
     ))
-  , odom_pub_(this->create_publisher<nav_msgs::msg::Odometry>(
-        "/odom_est", 
-        rclcpp::SensorDataQoS()
-    ))
 {
-    local_map_ = std::make_shared<pcl::PointCloud<pcl::PointNormal>>();
-    last_lidar_time_ = this->now();
     RCLCPP_INFO(this->get_logger(), "Lidar Odometry Node has been started.");
 }
 
@@ -38,18 +44,20 @@ Eigen::Isometry3f LidarOdometryNode::initializeLidarToBaseTransform() {
     return Eigen::Isometry3f(T.cast<float>());
 }
 
+pcl::PointCloud<pcl::PointXYZ>::Ptr LidarOdometryNode::convertToPCLAndTransform(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) {
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::fromROSMsg(*msg, *cloud);
+    pcl::transformPointCloud(*cloud, *cloud, lidar_to_base_transform_);
+    return cloud;
+}
+
 void LidarOdometryNode::lidarCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) {
     rclcpp::Time start = this->now();
     
     // 1. Convert and Pre-filter
-    pcl::PointCloud<pcl::PointXYZ>::Ptr current_scan(new pcl::PointCloud<pcl::PointXYZ>);
-    pcl::fromROSMsg(*msg, *current_scan);
-    pcl::transformPointCloud(*current_scan, *current_scan, lidar_to_base_transform_);
+    auto current_scan = convertToPCLAndTransform(msg);
     
-    pcl::VoxelGrid<pcl::PointXYZ> vg;
-    vg.setInputCloud(current_scan);
-    vg.setLeafSize(0.12f, 0.12f, 0.12f);
-    vg.filter(*current_scan);
+    downsample<pcl::PointXYZ>(current_scan, 0.12f);
 
     // 2. Compute Normals for CURRENT SCAN ONLY
     pcl::PointCloud<pcl::PointNormal>::Ptr current_with_normals(new pcl::PointCloud<pcl::PointNormal>);
@@ -125,16 +133,11 @@ void LidarOdometryNode::lidarCallback(const sensor_msgs::msg::PointCloud2::Const
     pcl::transformPointCloudWithNormals(*current_with_normals, *scan_world, current_pose_base_.matrix().cast<float>());
     
     scan_window_.push_back(scan_world);
-    if (scan_window_.size() > max_window_size_) scan_window_.pop_front();
 
     local_map_->clear();
     for (const auto& s : scan_window_) *local_map_ += *s;
     
-    // Optional: Downsample map to keep ICP speed constant
-    pcl::VoxelGrid<pcl::PointNormal> vg_map;
-    vg_map.setInputCloud(local_map_);
-    vg_map.setLeafSize(0.15f, 0.15f, 0.15f);
-    vg_map.filter(*local_map_);
+    downsample<pcl::PointNormal>(local_map_, 0.15f);
 
     // 9. Finish
     publishOdometry(msg->header.stamp);
