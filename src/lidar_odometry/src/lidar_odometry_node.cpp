@@ -5,6 +5,7 @@ namespace lidar_odometry
 
 LidarOdometryNode::LidarOdometryNode(const rclcpp::NodeOptions& options)
 : Node("lidar_odometry_node", options)
+  , lidar_to_base_transform_(initializeLidarToBaseTransform())
   , imu_sub_(this->create_subscription<sensor_msgs::msg::Imu>(
         "/livox/amr/imu",
         rclcpp::SensorDataQoS(),
@@ -23,9 +24,25 @@ LidarOdometryNode::LidarOdometryNode(const rclcpp::NodeOptions& options)
     RCLCPP_INFO(this->get_logger(), "Lidar Odometry Node has been started.");
 }
 
+Eigen::Isometry3d LidarOdometryNode::initializeLidarToBaseTransform()
+{
+    Eigen::Matrix4d T_lidar_to_base = Eigen::Matrix4d::Identity();
+
+    // Rotation: -180 degrees around Z
+    Eigen::AngleAxisd yaw_rotation(-M_PI, Eigen::Vector3d::UnitZ());
+    T_lidar_to_base.block<3,3>(0,0) = yaw_rotation.toRotationMatrix();
+
+    // Translation
+    T_lidar_to_base(0, 3) = -0.376;
+    T_lidar_to_base(1, 3) = -0.326;
+    T_lidar_to_base(2, 3) =  1.394;
+
+    return Eigen::Isometry3d(T_lidar_to_base);
+}
+
 void LidarOdometryNode::imuCallback(const sensor_msgs::msg::Imu::ConstSharedPtr msg)
 {
-    RCLCPP_INFO(this->get_logger(), "Received IMU data.");
+     RCLCPP_INFO(this->get_logger(), "Received IMU data.");
 }
 
 void LidarOdometryNode::lidarCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
