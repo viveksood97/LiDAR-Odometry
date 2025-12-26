@@ -31,6 +31,17 @@ LidarOdometryNode::LidarOdometryNode(const rclcpp::NodeOptions& options)
         std::bind(&LidarOdometryNode::lidarCallback, this, std::placeholders::_1)
     ))
 {
+    tree_ = std::make_shared<pcl::search::KdTree<pcl::PointXYZ>>();
+    // Pre-configure the estimator
+    ne_.setNumberOfThreads(0); // Use all cores
+    ne_.setSearchMethod(tree_);
+    ne_.setKSearch(12);
+
+    // Pre-configure the ICP
+    icp_.setMaxCorrespondenceDistance(0.8);
+    icp_.setTransformationEpsilon(1e-7);
+    icp_.setMaximumIterations(50);
+
     RCLCPP_INFO(this->get_logger(), "Lidar Odometry Node has been started.");
 }
 
@@ -45,10 +56,75 @@ Eigen::Isometry3f LidarOdometryNode::initializeLidarToBaseTransform() {
 }
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr LidarOdometryNode::convertToPCLAndTransform(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) {
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
+    auto cloud = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
     pcl::fromROSMsg(*msg, *cloud);
     pcl::transformPointCloud(*cloud, *cloud, lidar_to_base_transform_);
     return cloud;
+}
+
+pcl::PointCloud<pcl::PointNormal>::Ptr LidarOdometryNode::computeNormals(
+    const pcl::PointCloud<pcl::PointXYZ>::Ptr cloud) 
+{
+    auto cloud_with_normals = std::make_shared<pcl::PointCloud<pcl::PointNormal>>();
+    
+    ne_.setInputCloud(cloud);
+    ne_.compute(*cloud_with_normals);
+    pcl::copyPointCloud(*cloud, *cloud_with_normals);
+    
+    return cloud_with_normals;
+}
+
+Eigen::Isometry3d LidarOdometryNode::getInitialPoseGuess(const Eigen::Isometry3d& previous_pose, const double dt) {
+    Eigen::Isometry3d prediction = Eigen::Isometry3d::Identity();
+    prediction.rotate(Eigen::AngleAxisd(imu_yaw_rate_ * dt, Eigen::Vector3d::UnitZ()));
+    if (velocity_valid_ && dt < 0.5) { // Ensure dt is sane
+        prediction.pretranslate(last_velocity_linear_ * dt);
+    }
+    return previous_pose * prediction;
+}
+
+double LidarOdometryNode::getPoseICP(const pcl::PointCloud<pcl::PointNormal>::Ptr current_with_normals, const Eigen::Isometry3d& global_guess, const double dt) {
+    icp_.setInputSource(current_with_normals);
+    icp_.setInputTarget(local_map_);
+    pcl::PointCloud<pcl::PointNormal> aligned;
+    icp_.align(aligned, global_guess.matrix().cast<float>());
+    double score = icp_.getFitnessScore();
+    Eigen::Isometry3d previous_pose = current_pose_base_;
+
+    if (icp_.hasConverged() && score < 0.6) {
+        current_pose_base_ = Eigen::Isometry3d(icp_.getFinalTransformation().cast<double>());
+        if (dt > 0.001) {
+            last_velocity_linear_ = (current_pose_base_.translation() - previous_pose.translation()) / dt;
+            velocity_valid_ = true;
+        }
+    } else {
+        RCLCPP_WARN(this->get_logger(), "ICP Failed/Degenerate (Score: %.3f). Using Prediction.", score);
+        Eigen::Isometry3d icp_res(icp_.getFinalTransformation().cast<double>());
+        double yaw = atan2(icp_res.rotation()(1,0), icp_res.rotation()(0,0));
+        current_pose_base_.linear() = Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
+        current_pose_base_.translation() = global_guess.translation();
+    }
+
+    // 7. Pose Constraints (2D optimization)
+    current_pose_base_.translation().z() = 0.0;
+    double final_yaw = atan2(current_pose_base_.rotation()(1,0), current_pose_base_.rotation()(0,0));
+    current_pose_base_.linear() = Eigen::AngleAxisd(final_yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
+    return score;
+}
+
+void LidarOdometryNode::updateLocalMap(const pcl::PointCloud<pcl::PointNormal>::Ptr current_with_normals) {
+    auto scan_world = std::make_shared<pcl::PointCloud<pcl::PointNormal>>();
+    pcl::transformPointCloudWithNormals(*current_with_normals, *scan_world, current_pose_base_.matrix().cast<float>());
+    
+    scan_window_.push_back(scan_world);
+    
+    local_map_->clear();
+    size_t total_points = 0;
+    for (const auto& s : scan_window_) total_points += s->size();
+    local_map_->reserve(total_points);
+    for (const auto& s : scan_window_) *local_map_ += *s;
+    
+    downsample<pcl::PointNormal>(local_map_, 0.15f);
 }
 
 void LidarOdometryNode::lidarCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) {
@@ -60,21 +136,7 @@ void LidarOdometryNode::lidarCallback(const sensor_msgs::msg::PointCloud2::Const
     downsample<pcl::PointXYZ>(current_scan, 0.12f);
 
     // 2. Compute Normals for CURRENT SCAN ONLY
-    pcl::PointCloud<pcl::PointNormal>::Ptr current_with_normals(new pcl::PointCloud<pcl::PointNormal>);
-    pcl::NormalEstimationOMP<pcl::PointXYZ, pcl::PointNormal> ne;
-    ne.setNumberOfThreads(0);
-    pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>());
-    ne.setSearchMethod(tree);
-    ne.setKSearch(12);
-    ne.setInputCloud(current_scan);
-    ne.compute(*current_with_normals);
-    
-    // Fill XYZ fields (compute only fills normals)
-    for(size_t i=0; i<current_scan->size(); ++i) {
-        current_with_normals->points[i].x = current_scan->points[i].x;
-        current_with_normals->points[i].y = current_scan->points[i].y;
-        current_with_normals->points[i].z = current_scan->points[i].z;
-    }
+    auto current_with_normals = computeNormals(current_scan);
 
     // 3. Handle First Frame
     if (!initialized_) {
@@ -87,57 +149,14 @@ void LidarOdometryNode::lidarCallback(const sensor_msgs::msg::PointCloud2::Const
 
     // 4. Motion Prediction
     double dt = (rclcpp::Time(msg->header.stamp) - last_lidar_time_).seconds();
-    Eigen::Isometry3d prediction = Eigen::Isometry3d::Identity();
-    prediction.rotate(Eigen::AngleAxisd(imu_yaw_rate_ * dt, Eigen::Vector3d::UnitZ()));
-    if (velocity_valid_ && dt < 0.5) { // Ensure dt is sane
-        prediction.pretranslate(last_velocity_linear_ * dt);
-    }
-    Eigen::Isometry3d global_guess = current_pose_base_ * prediction;
+    Eigen::Isometry3d global_guess = getInitialPoseGuess(current_pose_base_, dt);
 
     // 5. Point-to-Plane ICP
-    pcl::IterativeClosestPointWithNormals<pcl::PointNormal, pcl::PointNormal> icp;
-    icp.setInputSource(current_with_normals);
-    icp.setInputTarget(local_map_); // local_map_ already has normals
-    icp.setMaxCorrespondenceDistance(0.8);
-    icp.setTransformationEpsilon(1e-7);
-    icp.setMaximumIterations(50);
+    double score = getPoseICP(current_with_normals, global_guess, dt);
 
-    pcl::PointCloud<pcl::PointNormal> aligned;
-    icp.align(aligned, global_guess.matrix().cast<float>());
-
-    // 6. Convergence & State Update
-    double score = icp.getFitnessScore();
-    Eigen::Isometry3d previous_pose = current_pose_base_;
-
-    if (icp.hasConverged() && score < 0.6) {
-        current_pose_base_ = Eigen::Isometry3d(icp.getFinalTransformation().cast<double>());
-        if (dt > 0.001) {
-            last_velocity_linear_ = (current_pose_base_.translation() - previous_pose.translation()) / dt;
-            velocity_valid_ = true;
-        }
-    } else {
-        RCLCPP_WARN(this->get_logger(), "ICP Failed/Degenerate (Score: %.3f). Using Prediction.", score);
-        Eigen::Isometry3d icp_res(icp.getFinalTransformation().cast<double>());
-        double yaw = atan2(icp_res.rotation()(1,0), icp_res.rotation()(0,0));
-        current_pose_base_.linear() = Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
-        current_pose_base_.translation() = global_guess.translation();
-    }
-
-    // 7. Pose Constraints (2D optimization)
-    current_pose_base_.translation().z() = 0.0;
-    double final_yaw = atan2(current_pose_base_.rotation()(1,0), current_pose_base_.rotation()(0,0));
-    current_pose_base_.linear() = Eigen::AngleAxisd(final_yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
 
     // 8. Efficient Map Update
-    pcl::PointCloud<pcl::PointNormal>::Ptr scan_world(new pcl::PointCloud<pcl::PointNormal>);
-    pcl::transformPointCloudWithNormals(*current_with_normals, *scan_world, current_pose_base_.matrix().cast<float>());
-    
-    scan_window_.push_back(scan_world);
-
-    local_map_->clear();
-    for (const auto& s : scan_window_) *local_map_ += *s;
-    
-    downsample<pcl::PointNormal>(local_map_, 0.15f);
+    updateLocalMap(current_with_normals);
 
     // 9. Finish
     publishOdometry(msg->header.stamp);

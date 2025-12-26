@@ -32,9 +32,6 @@ private:
       pcl::VoxelGrid<T> vg;
       vg.setInputCloud(cloud);
       vg.setLeafSize(leaf_size, leaf_size, leaf_size);
-      
-      // Create a temporary cloud to store results if you want to be safe, 
-      // though PCL allows in-place filtering for VoxelGrid.
       vg.filter(*cloud);
    }
     ///
@@ -50,8 +47,17 @@ private:
     ///
     Eigen::Isometry3f initializeLidarToBaseTransform();
     pcl::PointCloud<pcl::PointXYZ>::Ptr convertToPCLAndTransform(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
+    pcl::PointCloud<pcl::PointNormal>::Ptr computeNormals(const pcl::PointCloud<pcl::PointXYZ>::Ptr cloud);
+    Eigen::Isometry3d getInitialPoseGuess(const Eigen::Isometry3d& previous_pose, const double dt);
+    double getPoseICP(const pcl::PointCloud<pcl::PointNormal>::Ptr current_with_normals, const Eigen::Isometry3d& global_guess, const double dt);
+    void updateLocalMap(const pcl::PointCloud<pcl::PointNormal>::Ptr current_with_normals);
     void lidarCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
     void publishOdometry(const rclcpp::Time& timestamp);
+
+    // Persistent PCL objects to avoid re-allocation
+    pcl::NormalEstimationOMP<pcl::PointXYZ, pcl::PointNormal> ne_;
+    pcl::search::KdTree<pcl::PointXYZ>::Ptr tree_;
+    pcl::IterativeClosestPointWithNormals<pcl::PointNormal, pcl::PointNormal> icp_;
     
     // Core transforms and state
     Eigen::Isometry3f lidar_to_base_transform_;
