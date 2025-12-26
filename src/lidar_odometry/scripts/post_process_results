@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import argparse
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -10,72 +9,143 @@ from datetime import datetime
 
 def get_results_path():
     parser = argparse.ArgumentParser(description="Directory for results.")
-    parser.add_argument("--results-dir", default="results", help="Path to the CSV file.")
+    parser.add_argument(
+        "--results-dir",
+        default="results",
+        help="Path to the results directory."
+    )
     args = parser.parse_args()
     return args.results_dir
+
 
 def main():
     results_dir = get_results_path()
     csv_path = os.path.join(results_dir, "trajectory_data.csv")
+    
     if not os.path.exists(csv_path):
         print(f"Error: {csv_path} not found.")
         return
-
+    
     df = pd.read_csv(csv_path)
-    if df.empty: 
+    
+    if df.empty:
         print("Error: CSV is empty.")
         return
-
-    # Calculate relative time
-    time = df['timestamp_sec'] - df['timestamp_sec'].iloc[0]
     
-    # Updated to 1 row, 3 columns to accommodate Yaw Error
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 6))
-
-    # Plot 1: 2D Trajectory
-    ax1.plot(df['gt_x'], df['gt_y'], 'k--', label='Ground Truth', alpha=0.7)
-    ax1.plot(df['est_x'], df['est_y'], 'b-', label='Lidar Odometry', linewidth=2)
-    ax1.set_title("2D Trajectory (Top-Down)")
-    ax1.set_xlabel("X [m]")
-    ax1.set_ylabel("Y [m]")
-    ax1.legend()
-    ax1.axis('equal') 
-    ax1.grid(True)
-
-    # Plot 2: 2D Translation Error
-    ax2.fill_between(time, df['pos_err'], color='red', alpha=0.2)
-    ax2.plot(time, df['pos_err'], 'r-', label='Pos Error (m)')
-    rmse_pos = np.sqrt(np.mean(df['pos_err']**2))
-    ax2.axhline(rmse_pos, color='darkred', linestyle=':', label=f'RMSE: {rmse_pos:.3f}m')
-    ax2.set_title("2D Translation Error Over Time")
-    ax2.set_xlabel("Time [s]")
-    ax2.set_ylabel("Error [m]")
-    ax2.legend()
-    ax2.grid(True)
-
-    # Plot 3: Yaw Error
-    # Assuming 'yaw_err' exists in the CSV. 
-    # If values are in radians, you might want to convert to degrees: df['yaw_err'] * (180/np.pi)
-    ax3.fill_between(time, df['yaw_err'], color='green', alpha=0.2)
-    ax3.plot(time, df['yaw_err'], 'g-', label='Yaw Error')
-    rmse_yaw = np.sqrt(np.mean(df['yaw_err']**2))
-    ax3.axhline(rmse_yaw, color='darkgreen', linestyle=':', label=f'RMSE: {rmse_yaw:.3f}')
-    ax3.set_title("Yaw Error Over Time")
-    ax3.set_xlabel("Time [s]")
-    ax3.set_ylabel("Error [rad/deg]")
-    ax3.legend()
-    ax3.grid(True)
-
+    # Relative time
+    time = df["timestamp_sec"] - df["timestamp_sec"].iloc[0]
+    
+    # Create 2x2 subplot layout
+    fig, ((ax_traj, ax_rate), (ax_pos, ax_yaw)) = plt.subplots(
+        2, 2, figsize=(20, 12)
+    )
+    
+    # ---------------- Plot 1: 2D Trajectory ----------------
+    ax_traj.plot(
+        df["gt_x"], df["gt_y"],
+        "k--", label="Ground Truth", alpha=0.7
+    )
+    ax_traj.plot(
+        df["est_x"], df["est_y"],
+        "b-", label="Lidar Odometry", linewidth=2
+    )
+    ax_traj.set_title("2D Trajectory (Top-Down)")
+    ax_traj.set_xlabel("X [m]")
+    ax_traj.set_ylabel("Y [m]")
+    ax_traj.legend()
+    ax_traj.axis("equal")
+    ax_traj.grid(True)
+    
+    # ---------------- Plot 2: Publish Rate ----------------
+    if "est_rate_hz" in df.columns:
+        rate = df["est_rate_hz"]
+        window = 10
+        rate_smooth = rate.rolling(
+            window=window, min_periods=1
+        ).mean()
+        ax_rate.plot(
+            time, rate,
+            alpha=0.3, label="Instantaneous Rate"
+        )
+        ax_rate.plot(
+            time, rate_smooth,
+            linewidth=2,
+            label=f"Smoothed ({window} samples)"
+        )
+        mean_rate = rate[rate > 0].mean()
+        ax_rate.axhline(
+            mean_rate,
+            linestyle=":",
+            label=f"Mean: {mean_rate:.2f} Hz"
+        )
+        ax_rate.set_title("Odometry Publish Rate")
+        ax_rate.set_xlabel("Time [s]")
+        ax_rate.set_ylabel("Rate [Hz]")
+        ax_rate.legend()
+        ax_rate.grid(True)
+    else:
+        ax_rate.text(
+            0.5, 0.5,
+            "est_rate_hz not found in CSV",
+            ha="center", va="center",
+            transform=ax_rate.transAxes
+        )
+        ax_rate.set_axis_off()
+    
+    # ---------------- Plot 3: Translation Error ----------------
+    ax_pos.fill_between(
+        time, df["pos_err"], alpha=0.2
+    )
+    ax_pos.plot(
+        time, df["pos_err"],
+        label="Pos Error (m)"
+    )
+    rmse_pos = np.sqrt(
+        np.mean(df["pos_err"] ** 2)
+    )
+    ax_pos.axhline(
+        rmse_pos,
+        linestyle=":",
+        label=f"RMSE: {rmse_pos:.3f} m"
+    )
+    ax_pos.set_title("2D Translation Error Over Time")
+    ax_pos.set_xlabel("Time [s]")
+    ax_pos.set_ylabel("Error [m]")
+    ax_pos.legend()
+    ax_pos.grid(True)
+    
+    # ---------------- Plot 4: Yaw Error (NO SHADING) ----------------
+    ax_yaw.plot(
+        time, df["yaw_err"],
+        label="Yaw Error"
+    )
+    rmse_yaw = np.sqrt(
+        np.mean(df["yaw_err"] ** 2)
+    )
+    ax_yaw.axhline(
+        rmse_yaw,
+        linestyle=":",
+        label=f"RMSE: {rmse_yaw:.3f}"
+    )
+    ax_yaw.set_title("Yaw Error Over Time")
+    ax_yaw.set_xlabel("Time [s]")
+    ax_yaw.set_ylabel("Error [rad]")
+    ax_yaw.legend()
+    ax_yaw.grid(True)
+    
     plt.tight_layout()
-
-    # Save and Open
-    output_dir = os.path.join(results_dir)
-    os.makedirs(output_dir, exist_ok=True)
-    save_path = os.path.join(output_dir, f"2d_analysis_{datetime.now().strftime('%H%M%S')}.png")
+    
+    # Save output
+    os.makedirs(results_dir, exist_ok=True)
+    save_path = os.path.join(
+        results_dir,
+        f"analysis_{datetime.now().strftime('%H%M%S')}.png"
+    )
     plt.savefig(save_path, dpi=300)
     plt.close(fig)
     
-    print(f"[Post-Process] 2D plots (including Yaw) saved to: {save_path}")
+    print(f"[Post-Process] Plots saved to: {save_path}")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

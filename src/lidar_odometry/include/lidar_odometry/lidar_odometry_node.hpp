@@ -40,7 +40,7 @@ private:
     /// @note This transform is a static transformation from the LiDAR frame to the base 
     /// frame and we should not be using tf_lookup for this. Ideally this lives in a 
     /// config file. I have hard-coded it in this method for now.
-    /// @note This transform will we used for both imu and lidar based on looking at the
+    /// @note This transform can be used for both imu and lidar based on looking at the
     /// tf's in foxglove.
     ///
     /// @return The transformation matrix from LiDAR frame to base frame.
