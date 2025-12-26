@@ -4,32 +4,32 @@ namespace lidar_odometry {
 
 LidarOdometryNode::LidarOdometryNode(const rclcpp::NodeOptions& options)
 : Node("lidar_odometry_node", options)
-  , lidar_to_base_transform_(initializeLidarToBaseTransform())
-  , current_pose_base_(Eigen::Isometry3d::Identity())
-  , initialized_{false}
-  , last_velocity_linear_(Eigen::Vector3d::Zero())
-  , velocity_valid_{false}
-  , last_lidar_time_(this->now())
-  , imu_yaw_rate_(0.0)
-  , max_window_size_{15}
-  , scan_window_(max_window_size_)
-  , local_map_(std::make_shared<pcl::PointCloud<pcl::PointNormal>>())
-  , odom_pub_(this->create_publisher<nav_msgs::msg::Odometry>(
-        "/odom_est", 
-        rclcpp::SensorDataQoS()
-    ))
-  , imu_sub_(this->create_subscription<sensor_msgs::msg::Imu>(
-        "/livox/amr/imu",
-        rclcpp::SensorDataQoS(), 
-        [this](const sensor_msgs::msg::Imu::ConstSharedPtr msg) {
-            imu_yaw_rate_ = msg->angular_velocity.z;
-        }
-    ))
-  , lidar_sub_(this->create_subscription<sensor_msgs::msg::PointCloud2>(
-        "/livox/amr/lidar",
-        rclcpp::SensorDataQoS(),
-        std::bind(&LidarOdometryNode::lidarCallback, this, std::placeholders::_1)
-    ))
+, lidar_to_base_transform_(initializeLidarToBaseTransform())
+, current_pose_base_(Eigen::Isometry3d::Identity())
+, initialized_{false}
+, last_velocity_linear_(Eigen::Vector3d::Zero())
+, velocity_valid_{false}
+, last_lidar_time_(this->now())
+, imu_yaw_rate_(0.0)
+, max_window_size_{15}
+, scan_window_(max_window_size_)
+, local_map_(std::make_shared<pcl::PointCloud<pcl::PointNormal>>())
+, odom_pub_(this->create_publisher<nav_msgs::msg::Odometry>(
+      "/odom_est", 
+      rclcpp::SensorDataQoS()
+  ))
+, imu_sub_(this->create_subscription<sensor_msgs::msg::Imu>(
+      "/livox/amr/imu",
+      rclcpp::SensorDataQoS(), 
+      [this](const sensor_msgs::msg::Imu::ConstSharedPtr msg) {
+          imu_yaw_rate_ = msg->angular_velocity.z;
+      }
+  ))
+, lidar_sub_(this->create_subscription<sensor_msgs::msg::PointCloud2>(
+      "/livox/amr/lidar",
+      rclcpp::SensorDataQoS(),
+      std::bind(&LidarOdometryNode::lidarCallback, this, std::placeholders::_1)
+  ))
 {
     tree_ = std::make_shared<pcl::search::KdTree<pcl::PointXYZ>>();
     // Pre-configure the estimator
@@ -98,7 +98,7 @@ double LidarOdometryNode::getPoseICP(const pcl::PointCloud<pcl::PointNormal>::Pt
             velocity_valid_ = true;
         }
     } else {
-        RCLCPP_WARN(this->get_logger(), "ICP Failed/Degenerate (Score: %.3f). Using Prediction.", score);
+        RCLCPP_DEBUG(this->get_logger(), "ICP Failed/Degenerate (Score: %.3f). Using Prediction.", score);
         Eigen::Isometry3d icp_res(icp_.getFinalTransformation().cast<double>());
         double yaw = atan2(icp_res.rotation()(1,0), icp_res.rotation()(0,0));
         current_pose_base_.linear() = Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
@@ -163,7 +163,7 @@ void LidarOdometryNode::lidarCallback(const sensor_msgs::msg::PointCloud2::Const
     last_lidar_time_ = msg->header.stamp;
 
     long long ms = (this->now() - start).to_chrono<std::chrono::milliseconds>().count();
-    RCLCPP_INFO_EXPRESSION(this->get_logger(), ms > 100, "High Latency Detected - Odom Loop: %lld ms", ms);
+    RCLCPP_DEBUG_EXPRESSION(this->get_logger(), ms > 100, "High Latency Detected - Odom Loop: %lld ms", ms);
 }
 
 void LidarOdometryNode::publishOdometry(const rclcpp::Time& timestamp) {
