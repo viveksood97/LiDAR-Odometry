@@ -27,7 +27,6 @@
 
   <depend>pcl_conversions</depend>
   <depend>pcl_ros</depend>
-  <depend>pcl</depend>
   <depend>boost</depend>
   <depend>libomp-dev</depend>
   
@@ -36,6 +35,9 @@
   <exec_depend>python3-matplotlib</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-tqdm</exec_depend>
+  <exec_depend>python3-reportlab</exec_depend>
+  <exec_depend>python3-markdown</exec_depend>
+  <exec_depend>python3-bs4</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
