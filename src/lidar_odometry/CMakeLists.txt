@@ -5,6 +5,7 @@ if(POLICY CMP0144)
   cmake_policy(SET CMP0144 NEW)
 endif()
 
+# Cant fix PCL warnings for now as PCL is just TRASH!!!
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
 
