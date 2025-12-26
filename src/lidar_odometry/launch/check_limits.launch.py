@@ -15,6 +15,12 @@ def generate_launch_description():
                 name='odom_node',
                 extra_arguments=[{'use_intra_process_comms': True}]
             ),
+            ComposableNode(
+                package='lidar_odometry',
+                plugin='lidar_odometry::OdometryAnalyzer',
+                name='odom_analyzer',
+                extra_arguments=[{'use_intra_process_comms': True}]
+            )
         ],
         output='screen',
     )

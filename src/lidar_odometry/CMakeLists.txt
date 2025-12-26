@@ -27,6 +27,24 @@ rclcpp_components_register_node(${PROJECT_NAME}
   EXECUTABLE ${PROJECT_NAME}_lidar_odom_node_exe
 )
 
+
+set(${PROJECT_NAME}_ODOM_ANALYZER_SRCS
+  src/odom_analyzer.cpp
+)
+
+# set(${PROJECT_NAME}_LIDAR_ODOM_HEADERS
+#   include/${PROJECT_NAME}/lidar_odometry_node.hpp
+# )
+
+ament_auto_add_library(${PROJECT_NAME}_odom_analyzer SHARED
+  ${${PROJECT_NAME}_ODOM_ANALYZER_SRCS}
+)
+
+rclcpp_components_register_node(${PROJECT_NAME}_odom_analyzer
+  PLUGIN "lidar_odometry::OdometryAnalyzer"
+  EXECUTABLE ${PROJECT_NAME}_odom_analyzer_node_exe
+)
+
 ament_auto_package(INSTALL_TO_SHARE
   launch
 )
