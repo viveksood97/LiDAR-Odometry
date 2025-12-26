@@ -1,0 +1,13 @@
+*.bag
+*.mcap
+*.db3
+
+# Temporary files
+.vscode/
+.cache/*
+!.cache/.placeholder
+
+# Build artifacts
+build/
+install/
+log/
