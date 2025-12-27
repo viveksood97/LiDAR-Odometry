@@ -39,6 +39,9 @@ These were generated against a test bag
 
 **ATE RMSE**: 0.1361 m | **Yaw RMSE**: 1.59° | **Avg Rate**: 19.7 Hz
 
+Note: We see an ofset of about 0.07m from the start which can be attributed to the fact that for me the
+the robot starts at (0,0,0) which is probably not true for the ground truth data
+
 | Metric | Translation | Yaw | Rate (Hz) |
 |--------|-------------|-----|-----------|
 | RMSE | 0.1361 m | 1.59° |  |
