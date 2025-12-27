@@ -51,7 +51,6 @@ Eigen::Isometry3f LidarOdometryNode::initializeLidarToBaseTransform() {
     T(0, 3) = -0.376; 
     T(1, 3) = -0.326; 
     T(2, 3) = 1.394;
-
     return Eigen::Isometry3f(T.cast<float>());
 }
 
@@ -147,18 +146,16 @@ void LidarOdometryNode::lidarCallback(const sensor_msgs::msg::PointCloud2::Const
         return;
     }
 
-    // 4. Motion Prediction
+    // 4. Pose estimate for ICP
     double dt = (rclcpp::Time(msg->header.stamp) - last_lidar_time_).seconds();
     Eigen::Isometry3d global_guess = getInitialPoseGuess(current_pose_base_, dt);
 
     // 5. Point-to-Plane ICP
     double score = getPoseICP(current_with_normals, global_guess, dt);
 
-
-    // 8. Efficient Map Update
+    // 6. Efficient Map Update
     updateLocalMap(current_with_normals);
 
-    // 9. Finish
     publishOdometry(msg->header.stamp);
     last_lidar_time_ = msg->header.stamp;
 

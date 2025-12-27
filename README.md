@@ -41,10 +41,10 @@ These were generated against a test bag
 
 | Metric | Translation | Yaw | Rate (Hz) |
 |--------|-------------|-----|-----------|
-| RMSE/Mean | 0.1361 m | 1.59° | 19.7 |
-| Mean | 0.1288 m | 1.49° | ±1.9 |
-| Std Dev | 0.0439 m | 0.56° | 2.5-20.0 |
-| Max | 0.2126 m | 4.46° | |
+| RMSE | 0.1361 m | 1.59° |  |
+| Mean | 0.1288 m | 1.49° | 19.7 |
+| Std Dev | ±0.0439 | ±0.56° | ±1.9 |
+| Max | 0.2126 m | 4.46° | 2.5-20.0 |
 
 ## Analysis Plots
 
